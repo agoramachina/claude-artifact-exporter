@@ -299,7 +299,7 @@ function processConversation(conversation, zip, usedNames) {
         for (const artifact of artifacts) {
           // Check if this is a programming language artifact
           if (isProgrammingLanguage(artifact.language)) {
-            // Programming code: save only in original format
+            // Programming code: save only in original format (root of conversation folder)
             const fileName = getUniqueFileName(
               artifact.title,
               artifact.language,
@@ -309,8 +309,8 @@ function processConversation(conversation, zip, usedNames) {
             zip.file(fileName, artifact.content);
             artifactCount++;
           } else {
-            // Document/text: export in multiple formats
-            // 1. Original format
+            // Document/text: export in multiple formats with subfolders
+            // 1. Original format (root folder)
             const originalFileName = getUniqueFileName(
               artifact.title,
               artifact.language,
@@ -320,34 +320,34 @@ function processConversation(conversation, zip, usedNames) {
             zip.file(originalFileName, artifact.content);
             artifactCount++;
 
-            // 2. JSON format (with metadata)
+            // 2. JSON format (json subfolder)
             const jsonFileName = getUniqueFileName(
               artifact.title,
               artifact.language,
               usedNames,
-              conversationName,
+              `${conversationName}/json`,
               '.json'
             );
             zip.file(jsonFileName, generateArtifactJSON(artifact));
             artifactCount++;
 
-            // 3. Markdown format
+            // 3. Markdown format (md subfolder)
             const mdFileName = getUniqueFileName(
               artifact.title,
               artifact.language,
               usedNames,
-              conversationName,
+              `${conversationName}/md`,
               '.md'
             );
             zip.file(mdFileName, generateArtifactMarkdown(artifact));
             artifactCount++;
 
-            // 4. Plain text format
+            // 4. Plain text format (txt subfolder)
             const txtFileName = getUniqueFileName(
               artifact.title,
               artifact.language,
               usedNames,
-              conversationName,
+              `${conversationName}/txt`,
               '.txt'
             );
             zip.file(txtFileName, artifact.content);
@@ -382,10 +382,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     (async () => {
       try {
         console.log('Starting bulk artifact export...');
+        console.log('Organization ID:', request.orgId);
 
         // Fetch all conversations
         const conversations = await fetchAllConversations(request.orgId);
+        console.log(`\n=== INITIAL SCAN ===`);
         console.log(`Found ${conversations.length} conversations`);
+        console.log(`First few conversations:`, conversations.slice(0, 5).map(c => ({
+          uuid: c.uuid,
+          name: c.name,
+          updated_at: c.updated_at
+        })));
 
         const zip = new JSZip();
         const usedNames = new Set();
@@ -398,18 +405,28 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           try {
             processedCount++;
 
-            // Send progress update
-            chrome.runtime.sendMessage({
-              action: 'exportProgress',
-              current: processedCount,
-              total: conversations.length,
-              conversationName: conv.name || 'Untitled'
-            });
+            // Send progress update (ignore errors if popup closed)
+            try {
+              chrome.runtime.sendMessage({
+                action: 'exportProgress',
+                current: processedCount,
+                total: conversations.length,
+                conversationName: conv.name || 'Untitled'
+              });
+            } catch (e) {
+              // Popup might be closed, ignore
+            }
 
-            console.log(`Processing ${processedCount}/${conversations.length}: ${conv.name || conv.uuid}`);
+            console.log(`\n=== Processing ${processedCount}/${conversations.length}: ${conv.name || conv.uuid} ===`);
 
             // Fetch full conversation data
             const fullConv = await fetchConversation(request.orgId, conv.uuid);
+            console.log(`  Fetched conversation data:`, {
+              uuid: fullConv.uuid,
+              name: fullConv.name,
+              message_count: fullConv.chat_messages ? fullConv.chat_messages.length : 0,
+              has_messages: !!fullConv.chat_messages
+            });
 
             // Extract artifacts from this conversation
             const artifactCount = processConversation(fullConv, zip, usedNames);
@@ -424,10 +441,20 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             await new Promise(resolve => setTimeout(resolve, 500));
 
           } catch (error) {
-            console.error(`Failed to process conversation ${conv.uuid}:`, error);
+            console.error(`❌ Failed to process conversation ${conv.uuid} (${conv.name || 'Untitled'}):`, error);
+            console.error(`   Error details:`, {
+              message: error.message,
+              status: error.status,
+              stack: error.stack
+            });
             // Continue with next conversation even if one fails
           }
         }
+
+        console.log(`\n=== EXPORT SUMMARY ===`);
+        console.log(`Total conversations scanned: ${conversations.length}`);
+        console.log(`Conversations with artifacts: ${conversationsWithArtifacts}`);
+        console.log(`Total artifact files created: ${totalArtifacts}`);
 
         if (totalArtifacts === 0) {
           sendResponse({
