@@ -47,12 +47,52 @@ function extractArtifacts(text) {
     const fullTag = match[0];
     const content = match[1];
 
-    const titleMatch = fullTag.match(/title="([^"]*)/);
-    const languageMatch = fullTag.match(/language="([^"]*)/);
+    // Extract attributes - handle both old and new formats
+    const titleMatch = fullTag.match(/title="([^"]*)"/);
+    const typeMatch = fullTag.match(/type="([^"]*)"/);
+    const languageMatch = fullTag.match(/language="([^"]*)"/);
+    const identifierMatch = fullTag.match(/identifier="([^"]*)"/);
+
+    // Determine the artifact type and language
+    let artifactType = 'text';
+    let language = 'txt';
+
+    if (typeMatch) {
+      const type = typeMatch[1];
+      // Map type to language/format
+      if (type === 'text/html') {
+        language = 'html';
+        artifactType = 'code';
+      } else if (type === 'text/markdown') {
+        language = 'markdown';
+        artifactType = 'document';
+      } else if (type === 'application/vnd.ant.code') {
+        language = languageMatch ? languageMatch[1] : 'txt';
+        artifactType = 'code';
+      } else if (type === 'text/css') {
+        language = 'css';
+        artifactType = 'code';
+      } else if (type === 'application/vnd.ant.mermaid') {
+        language = 'mermaid';
+        artifactType = 'document';
+      } else if (type === 'application/vnd.ant.react') {
+        language = 'jsx';
+        artifactType = 'code';
+      } else if (type === 'image/svg+xml') {
+        language = 'svg';
+        artifactType = 'code';
+      }
+    } else if (languageMatch) {
+      // Old format - just language attribute
+      language = languageMatch[1];
+      artifactType = 'code';
+    }
 
     artifacts.push({
       title: titleMatch ? titleMatch[1] : 'Untitled',
-      language: languageMatch ? languageMatch[1] : 'txt',
+      language: language,
+      type: artifactType,
+      identifier: identifierMatch ? identifierMatch[1] : null,
       content: content.trim(),
     });
   }
@@ -70,13 +110,17 @@ function getFileExtension(language) {
     java: '.java',
     c: '.c',
     cpp: '.cpp',
+    'c++': '.cpp',
     ruby: '.rb',
     php: '.php',
     swift: '.swift',
     go: '.go',
     rust: '.rs',
     typescript: '.ts',
+    tsx: '.tsx',
+    jsx: '.jsx',
     shell: '.sh',
+    bash: '.sh',
     sql: '.sql',
     kotlin: '.kt',
     scala: '.scala',
@@ -85,16 +129,60 @@ function getFileExtension(language) {
     json: '.json',
     xml: '.xml',
     yaml: '.yaml',
+    yml: '.yml',
     markdown: '.md',
+    md: '.md',
     text: '.txt',
+    txt: '.txt',
+    // Academic/Document formats
+    latex: '.tex',
+    tex: '.tex',
+    bibtex: '.bib',
+    bib: '.bib',
+    // Diagram and visualization
+    mermaid: '.mmd',
+    svg: '.svg',
+    // Data formats
+    csv: '.csv',
+    toml: '.toml',
+    ini: '.ini',
+    // Other programming languages
+    perl: '.pl',
+    lua: '.lua',
+    dart: '.dart',
+    elixir: '.ex',
+    erlang: '.erl',
+    haskell: '.hs',
+    clojure: '.clj',
+    fsharp: '.fs',
+    'f#': '.fs',
+    'c#': '.cs',
+    csharp: '.cs',
+    'objective-c': '.m',
+    ocaml: '.ml',
+    scheme: '.scm',
+    lisp: '.lisp',
+    fortran: '.f90',
+    assembly: '.asm',
+    asm: '.asm',
+    // Markup and styling
+    scss: '.scss',
+    sass: '.sass',
+    less: '.less',
+    stylus: '.styl',
+    // Other
+    dockerfile: '.dockerfile',
+    makefile: '.mk',
+    gradle: '.gradle',
+    groovy: '.groovy',
   };
   return languageToExt[language.toLowerCase()] || '.txt';
 }
 
 // Generate unique filename
-function getUniqueFileName(title, language, usedNames, conversationFolder = '') {
+function getUniqueFileName(title, language, usedNames, conversationFolder = '', customExtension = null) {
   let baseName = title.replace(/[^\w\-._/]+/g, '_');
-  let extension = getFileExtension(language);
+  let extension = customExtension || getFileExtension(language);
 
   // Handle path-like titles (e.g., "src/components/Button.jsx")
   const parts = baseName.split('/');
@@ -118,16 +206,64 @@ function getUniqueFileName(title, language, usedNames, conversationFolder = '') 
   return fileName;
 }
 
+// Check if a language is a programming language (should be saved in original format only)
+function isProgrammingLanguage(language) {
+  const programmingLanguages = [
+    'javascript', 'typescript', 'python', 'java', 'c', 'cpp', 'c++', 'ruby', 'php',
+    'swift', 'go', 'rust', 'jsx', 'tsx', 'shell', 'bash', 'sql', 'kotlin', 'scala',
+    'r', 'perl', 'lua', 'dart', 'elixir', 'erlang', 'haskell', 'clojure', 'fsharp',
+    'f#', 'c#', 'csharp', 'objective-c', 'ocaml', 'scheme', 'lisp', 'fortran',
+    'assembly', 'asm', 'groovy', 'html', 'css', 'scss', 'sass', 'less', 'stylus'
+  ];
+  return programmingLanguages.includes(language.toLowerCase());
+}
+
+// Generate artifact metadata as JSON
+function generateArtifactJSON(artifact) {
+  return JSON.stringify({
+    title: artifact.title,
+    language: artifact.language,
+    type: artifact.type,
+    identifier: artifact.identifier,
+    content: artifact.content,
+    exported_at: new Date().toISOString()
+  }, null, 2);
+}
+
+// Generate artifact as Markdown
+function generateArtifactMarkdown(artifact) {
+  let markdown = `# ${artifact.title}\n\n`;
+
+  if (artifact.identifier) {
+    markdown += `**Identifier:** ${artifact.identifier}\n\n`;
+  }
+
+  markdown += `**Type:** ${artifact.type}\n`;
+  markdown += `**Language:** ${artifact.language}\n\n`;
+  markdown += `---\n\n`;
+
+  // Wrap content in code block if it's code
+  if (artifact.type === 'code') {
+    markdown += `\`\`\`${artifact.language}\n${artifact.content}\n\`\`\`\n`;
+  } else {
+    markdown += artifact.content;
+  }
+
+  return markdown;
+}
+
 // Process conversation to extract artifacts
 function processConversation(conversation, zip, usedNames) {
   let artifactCount = 0;
 
   if (!conversation.chat_messages) {
+    console.log(`  No chat_messages in conversation: ${conversation.name || conversation.uuid}`);
     return artifactCount;
   }
 
   // Sanitize conversation name for folder
   const conversationName = (conversation.name || 'Untitled').replace(/[^\w\-._]+/g, '_');
+  console.log(`  Processing conversation "${conversationName}" with ${conversation.chat_messages.length} messages`);
 
   // Process all messages in the conversation
   for (const message of conversation.chat_messages) {
@@ -153,19 +289,77 @@ function processConversation(conversation, zip, usedNames) {
       if (messageText) {
         const artifacts = extractArtifacts(messageText);
 
-        for (const artifact of artifacts) {
-          const fileName = getUniqueFileName(
-            artifact.title,
-            artifact.language,
-            usedNames,
-            conversationName
-          );
+        if (artifacts.length > 0) {
+          console.log(`    Found ${artifacts.length} artifact(s) in message`);
+          artifacts.forEach((art, idx) => {
+            console.log(`      [${idx + 1}] "${art.title}" (type: ${art.type}, language: ${art.language})`);
+          });
+        }
 
-          zip.file(fileName, artifact.content);
-          artifactCount++;
+        for (const artifact of artifacts) {
+          // Check if this is a programming language artifact
+          if (isProgrammingLanguage(artifact.language)) {
+            // Programming code: save only in original format
+            const fileName = getUniqueFileName(
+              artifact.title,
+              artifact.language,
+              usedNames,
+              conversationName
+            );
+            zip.file(fileName, artifact.content);
+            artifactCount++;
+          } else {
+            // Document/text: export in multiple formats
+            // 1. Original format
+            const originalFileName = getUniqueFileName(
+              artifact.title,
+              artifact.language,
+              usedNames,
+              conversationName
+            );
+            zip.file(originalFileName, artifact.content);
+            artifactCount++;
+
+            // 2. JSON format (with metadata)
+            const jsonFileName = getUniqueFileName(
+              artifact.title,
+              artifact.language,
+              usedNames,
+              conversationName,
+              '.json'
+            );
+            zip.file(jsonFileName, generateArtifactJSON(artifact));
+            artifactCount++;
+
+            // 3. Markdown format
+            const mdFileName = getUniqueFileName(
+              artifact.title,
+              artifact.language,
+              usedNames,
+              conversationName,
+              '.md'
+            );
+            zip.file(mdFileName, generateArtifactMarkdown(artifact));
+            artifactCount++;
+
+            // 4. Plain text format
+            const txtFileName = getUniqueFileName(
+              artifact.title,
+              artifact.language,
+              usedNames,
+              conversationName,
+              '.txt'
+            );
+            zip.file(txtFileName, artifact.content);
+            artifactCount++;
+          }
         }
       }
     }
+  }
+
+  if (artifactCount > 0) {
+    console.log(`  ✓ Extracted ${artifactCount} file(s) from "${conversationName}"`);
   }
 
   return artifactCount;
