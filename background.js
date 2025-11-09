@@ -221,6 +221,12 @@ function getUniqueFileName(title, language, usedNames, conversationFolder = '', 
   let baseName = title.replace(/[^\w\-._/]+/g, '_');
   let extension = customExtension || getFileExtension(language);
 
+  // If we're forcing a custom extension, strip any existing extension from baseName
+  if (customExtension) {
+    // Remove common file extensions from the end of baseName
+    baseName = baseName.replace(/\.(txt|md|json|html|css|js|jsx|tsx|ts|py|java|c|cpp|rb|php|go|rs|sh|sql|xml|yaml|yml|bib|tex|csv|toml|ini)$/i, '');
+  }
+
   // Handle path-like titles (e.g., "src/components/Button.jsx")
   const parts = baseName.split('/');
   if (parts.length > 1) {
